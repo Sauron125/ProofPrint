@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProofPrint — AI Fact & Citation Checker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ink: { 950: '#050208', 900: '#0b0710', 850: '#120c1c', 800: '#1a1226' }
+                    },
+                    fontFamily: {
+                        display: ['"Space Grotesk"', 'sans-serif'],
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+
+    <!-- PDF text extraction (upload) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- DOCX text extraction (upload) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <!-- PDF report generation (export) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .font-display {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        body {
+            background-color: #050208;
+            background-image:
+                radial-gradient(ellipse 70% 45% at 50% -10%, rgba(168, 85, 247, 0.14), transparent),
+                radial-gradient(ellipse 50% 35% at 100% 0%, rgba(139, 92, 246, 0.08), transparent),
+                radial-gradient(ellipse 40% 30% at 0% 100%, rgba(126, 34, 206, 0.06), transparent);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0b0710;
+            border-radius: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #3b2354;
+            border-radius: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #5b3480;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: -400px 0;
+            }
+
+            100% {
+                background-position: 400px 0;
+            }
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #120c1c 0%, #241839 20%, #120c1c 40%, #120c1c 100%);
+            background-size: 800px 100%;
+            animation: shimmer 1.6s linear infinite;
+        }
+
+        @keyframes scanline {
+            0% {
+                transform: translateY(-100%);
+            }
+
+            100% {
+                transform: translateY(2000%);
+            }
+        }
+
+        .scanline {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 40%;
+            background: linear-gradient(to bottom, transparent, rgba(168, 85, 247, 0.09), transparent);
+            animation: scanline 2.2s linear infinite;
+        }
+
+        .stamp {
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.12em;
+        }
+
+        .drop-active {
+            outline: 2px dashed rgba(168, 85, 247, 0.6);
+            outline-offset: -6px;
+            background-color: rgba(168, 85, 247, 0.05);
+        }
+
+        .tab-active {
+            color: #fff;
+            background: rgba(168, 85, 247, 0.16);
+            border-color: rgba(168, 85, 247, 0.4);
+        }
+
+        [data-tooltip] {
+            position: relative;
+        }
+
+        [data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1a1226;
+            color: #e9d8ff;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 5px 9px;
+            border-radius: 6px;
+            white-space: nowrap;
+            border: 1px solid #3b2354;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        .toast {
+            animation: toastIn 0.25s ease-out, toastOut 0.25s ease-in 1.6s forwards;
+        }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        @keyframes toastOut {
+            to {
+                opacity: 0;
+                transform: translate(-50%, -6px);
+            }
+        }
+
+        ::selection {
+            background: rgba(168, 85, 247, 0.35);
+        }
+    </style>
+</head>
+
+<body class="bg-ink-950 text-slate-200 p-4 md:p-8 min-h-screen">
+
+    <div class="max-w-7xl mx-auto space-y-7">
+
+        <!-- Header -->
+        <header
+            class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-purple-900/40 pb-6">
+            <div>
+                <div class="flex items-center gap-3">
+                    <div class="relative p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/25">
+                        <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h1 class="text-3xl font-display font-bold text-white tracking-tight">ProofPrint</h1>
+                    <span
+                        class="hidden sm:inline-flex items-center stamp text-[10px] font-semibold text-purple-300/90 border border-purple-500/40 rounded-full px-2.5 py-1 uppercase tracking-widest">
+                        Beta
+                    </span>
+                </div>
+                <p class="text-slate-400 mt-2 text-sm font-medium">AI-powered citation, statistic & hallucination
+                    verifier for academic writing</p>
+            </div>
+
+            <div class="flex items-center gap-4 text-xs text-slate-500 font-mono">
+                <div class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                    <span id="statusLabel">Ready</span>
+                </div>
+                <span class="text-slate-700">|</span>
+                <span id="sessionScans">0 scans this session</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <!-- Left Column: Input Area -->
+            <div class="space-y-4 flex flex-col h-full">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <h2 class="text-lg font-display font-semibold text-white flex items-center gap-2">
+                        Document Input
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <label for="citationStyle" class="sr-only">Citation style</label>
+                        <select id="citationStyle"
+                            class="bg-ink-900 border border-purple-900/50 text-slate-300 text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all cursor-pointer">
+                            <option value="APA">APA Style</option>
+                            <option value="MLA">MLA Style</option>
+                            <option value="Chicago">Chicago Style</option>
+                            <option value="Harvard">Harvard Style</option>
+                        </select>
+                        <input type="file" id="fileInput" accept=".txt,.md,.csv,.pdf,.docx" class="hidden">
+                        <button onclick="document.getElementById('fileInput').click()"
+                            data-tooltip="PDF, DOCX, TXT, MD, CSV"
+                            class="flex items-center gap-2 text-sm bg-ink-800 hover:bg-purple-900/40 px-4 py-2.5 rounded-lg transition-all border border-purple-900/50 text-white shadow-sm hover:shadow-md">
+                            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            Upload File
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Drop zone wrapping textarea -->
+                <div id="dropZone" class="relative rounded-2xl transition-all">
+                    <textarea id="textInput"
+                        placeholder="Paste your essay, research paper, or bibliography here — or drag a PDF, DOCX, or text file into this box..."
+                        class="w-full h-[60vh] min-h-[400px] bg-ink-900/80 border border-purple-900/50 rounded-2xl p-6 text-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none shadow-inner custom-scrollbar leading-relaxed text-base"></textarea>
+
+                    <div id="dropOverlay"
+                        class="hidden absolute inset-0 rounded-2xl bg-black/80 backdrop-blur-sm items-center justify-center flex-col gap-2 pointer-events-none">
+                        <svg class="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 16.5V9m0 0l3 3m-3-3l-3 3M6.75 19.5h10.5a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                        <p class="text-sm font-semibold text-purple-400">Drop to load document</p>
+                    </div>
+
+                    <!-- File chip -->
+                    <div id="fileChip"
+                        class="hidden absolute top-4 right-4 items-center gap-2 bg-ink-800/95 border border-purple-900/60 rounded-lg pl-3 pr-1.5 py-1.5 text-xs shadow-lg backdrop-blur">
+                        <svg class="w-3.5 h-3.5 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor"
+                            viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12h3.75M9 15h3.75M9 18h3.75m3-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                        <span id="fileChipName" class="text-slate-300 font-medium max-w-[160px] truncate"></span>
+                        <button onclick="clearFile()"
+                            class="p-1 hover:bg-purple-900/50 rounded-md transition-colors text-slate-400 hover:text-white"
+                            data-tooltip="Remove file">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Parsing overlay -->
+                    <div id="parsingOverlay"
+                        class="hidden absolute inset-0 rounded-2xl bg-black/90 backdrop-blur-sm items-center justify-center flex-col gap-3">
+                        <div class="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin">
+                        </div>
+                        <p id="parsingText" class="text-sm font-medium text-slate-300">Reading document...</p>
+                    </div>
+                </div>
+
+                <!-- Meta bar: word count + sample + clear -->
+                <div class="flex items-center justify-between text-xs text-slate-500 font-mono px-1">
+                    <div class="flex items-center gap-3">
+                        <span id="wordCount">0 words</span>
+                        <span class="text-slate-700">·</span>
+                        <span id="charCount">0 characters</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button onclick="loadSample()"
+                            class="hover:text-purple-400 transition-colors underline decoration-dotted underline-offset-2">Try
+                            a sample</button>
+                        <button onclick="clearAll()"
+                            class="hover:text-rose-400 transition-colors underline decoration-dotted underline-offset-2">Clear</button>
+                    </div>
+                </div>
+
+                <button id="analyzeBtn" onclick="analyzeText()"
+                    class="w-full py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-ink-800 disabled:text-slate-500 disabled:border-purple-900/40 disabled:cursor-not-allowed rounded-xl font-bold transition-all duration-200 flex items-center justify-center gap-2 text-white shadow-[0_0_20px_rgba(168,85,247,0.18)] hover:shadow-[0_0_25px_rgba(168,85,247,0.3)] border border-purple-400/50 disabled:shadow-none mt-auto">
+                    <svg id="btnIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                        </path>
+                    </svg>
+                    <span id="btnText">Scan Document for Issues</span>
+                    <kbd
+                        class="hidden sm:inline-block ml-2 text-[10px] font-mono bg-purple-800/50 border border-purple-300/30 rounded px-1.5 py-0.5 opacity-70">⌘⏎</kbd>
+                </button>
+                <div id="errorMsg"
+                    class="hidden p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-sm flex items-start gap-3">
+                    <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span id="errorText" class="leading-relaxed"></span>
+                </div>
+            </div>
+
+            <!-- Right Column: Results Area -->
+            <div class="space-y-4 flex flex-col h-full">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <h2 class="text-lg font-display font-semibold text-white">Integrity Report</h2>
+                    <div class="flex items-center gap-2">
+                        <button id="exportPdfBtn" onclick="exportPdf()" data-tooltip="Download formatted PDF report"
+                            class="hidden items-center gap-2 text-sm bg-purple-600 hover:bg-purple-500 text-white px-3.5 py-1.5 rounded-lg transition-all border border-purple-400/40 shadow-[0_0_12px_rgba(168,85,247,0.2)] font-semibold">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                            </svg>
+                            Export PDF
+                        </button>
+                        <div class="relative">
+                            <button id="exportMenuBtn" onclick="toggleExportMenu()" data-tooltip="Other formats"
+                                class="hidden items-center justify-center text-sm bg-ink-800 hover:bg-purple-900/40 text-slate-300 p-1.5 rounded-lg transition-all border border-purple-900/50">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </button>
+                            <div id="exportMenu"
+                                class="hidden absolute right-0 mt-2 w-44 bg-ink-800 border border-purple-900/50 rounded-xl shadow-xl overflow-hidden z-30 fade-in">
+                                <button onclick="exportReport('txt')"
+                                    class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-purple-900/30 transition-colors">Text
+                                    report (.txt)</button>
+                                <button onclick="exportReport('json')"
+                                    class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-purple-900/30 transition-colors">Raw
+                                    data (.json)</button>
+                                <button onclick="copyFullReport()"
+                                    class="w-full text-left px-4 py-2.5 text-sm text-slate-300 hover:bg-purple-900/30 transition-colors border-t border-purple-900/40">Copy
+                                    summary</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filter tabs (hidden until results exist) -->
+                <div id="filterBar" class="hidden flex-wrap items-center gap-2"></div>
+
+                <div id="resultsContainer"
+                    class="flex-1 h-[60vh] min-h-[500px] overflow-y-auto space-y-5 pr-3 custom-scrollbar pb-10">
+                    <!-- Default Empty State -->
+                    <div id="defaultState"
+                        class="flex flex-col items-center justify-center h-full text-slate-500 bg-ink-900/40 rounded-2xl border border-dashed border-purple-900/40">
+                        <div class="p-4 bg-ink-800/60 rounded-full mb-4">
+                            <svg class="w-8 h-8 opacity-60 text-purple-400" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+                                </path>
+                            </svg>
+                        </div>
+                        <p class="font-medium text-slate-300">Ready to analyze</p>
+                        <p class="text-sm mt-1 text-slate-500">Paste text or upload a document to generate a report.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="text-center text-xs text-slate-600 pt-2 pb-4 font-mono">
+            ProofPrint cross-references claims against known sources. Always verify critical citations manually.
+        </footer>
+    </div>
+
+    <div id="toastContainer" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"></div>
+
+    <script>
+        if (window['pdfjsLib']) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+
+        let currentResults = [];
+        let currentFilter = 'all';
+        let resultSearchTerm = '';
+        let sessionScanCount = 0;
+        let currentFileName = '';
+        let currentAbortController = null;
+
+        const textInput = document.getElementById('textInput');
+        const dropZone = document.getElementById('dropZone');
+        const dropOverlay = document.getElementById('dropOverlay');
+        const fileInput = document.getElementById('fileInput');
+        const parsingOverlay = document.getElementById('parsingOverlay');
+        const parsingText = document.getElementById('parsingText');
+        const fileChip = document.getElementById('fileChip');
+        const fileChipName = document.getElementById('fileChipName');
+
+        function updateCounts() {
+            const val = textInput.value;
+            const words = val.trim() === '' ? 0 : val.trim().split(/\s+/).length;
+            document.getElementById('wordCount').innerText = `${words.toLocaleString()} word${words === 1 ? '' : 's'}`;
+            document.getElementById('charCount').innerText = `${val.length.toLocaleString()} characters`;
+        }
+        textInput.addEventListener('input', updateCounts);
+        updateCounts();
+
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        ['dragenter', 'dragover'].forEach(evt => {
+            dropZone.addEventListener(evt, (e) => {
+                e.preventDefault(); e.stopPropagation();
+                dropZone.classList.add('drop-active');
+                dropOverlay.classList.remove('hidden');
+                dropOverlay.classList.add('flex');
+            });
+        });
+        ['dragleave', 'drop'].forEach(evt => {
+            dropZone.addEventListener(evt, (e) => {
+                e.preventDefault(); e.stopPropagation();
+                dropZone.classList.remove('drop-active');
+                dropOverlay.classList.add('hidden');
+                dropOverlay.classList.remove('flex');
+            });
+        });
+        dropZone.addEventListener('drop', (e) => {
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        async function handleFile(file) {
+            const name = file.name.toLowerCase();
+            const showParsing = (msg) => {
+                parsingText.innerText = msg;
+                parsingOverlay.classList.remove('hidden');
+                parsingOverlay.classList.add('flex');
+            };
+            const hideParsing = () => {
+                parsingOverlay.classList.add('hidden');
+                parsingOverlay.classList.remove('flex');
+            };
+
+            try {
+                let text = '';
+                if (name.endsWith('.pdf')) {
+                    showParsing('Extracting text from PDF...');
+                    text = await extractPdfText(file);
+                } else if (name.endsWith('.docx')) {
+                    showParsing('Extracting text from DOCX...');
+                    text = await extractDocxText(file);
+                } else if (name.endsWith('.txt') || name.endsWith('.md') || name.endsWith('.csv')) {
+                    showParsing('Reading file...');
+                    text = await readAsPlainText(file);
+                } else {
+                    showToast('Unsupported file type. Use PDF, DOCX, TXT, MD, or CSV.', 'error');
+                    return;
+                }
+
+                if (!text || text.trim() === '') {
+                    showToast('No readable text was found in that file.', 'error');
+                    hideParsing();
+                    return;
+                }
+
+                textInput.value = text;
+                updateCounts();
+                currentFileName = file.name;
+                fileChipName.innerText = file.name;
+                fileChip.classList.remove('hidden');
+                fileChip.classList.add('flex');
+                showToast(`Loaded "${file.name}"`, 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('Could not read that file: ' + err.message, 'error');
+            } finally {
+                hideParsing();
+                fileInput.value = '';
+            }
+        }
+
+        function readAsPlainText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = () => reject(new Error('Failed to read file.'));
+                reader.readAsText(file);
+            });
+        }
+
+        async function extractPdfText(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = '';
+
+            for (let i = 1; i <= pdf.numPages; i++) {
+                parsingText.innerText = `Extracting page ${i} of ${pdf.numPages}...`;
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+
+                content.items.sort((a, b) => {
+                    const yA = a.transform[5];
+                    const yB = b.transform[5];
+                    if (Math.abs(yA - yB) > 5) {
+                        return yB - yA;
+                    }
+                    return a.transform[4] - b.transform[4];
+                });
+
+                const pageText = content.items.map(item => item.str).join(' ');
+                fullText += pageText + '\n\n';
+            }
+            return fullText.trim();
+        }
+
+        async function extractDocxText(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return result.value;
+        }
+
+        function clearFile() {
+            currentFileName = '';
+            fileChip.classList.add('hidden');
+            fileChip.classList.remove('flex');
+        }
+
+        function clearAll() {
+            textInput.value = '';
+            updateCounts();
+            clearFile();
+            currentResults = [];
+            renderResults([]);
+            document.getElementById('defaultState')?.classList.remove('hidden');
+            document.getElementById('exportPdfBtn').classList.add('hidden');
+            document.getElementById('exportMenuBtn').classList.add('hidden');
+            document.getElementById('filterBar').classList.add('hidden');
+            document.getElementById('errorMsg').classList.add('hidden');
+        }
+
+        function loadSample() {
+            textInput.value = `Recent research indicates that regular aerobic exercise can increase hippocampal volume by up to 2% annually, effectively reversing age-related brain shrinkage by one to two years (Erickson et al., 2011). Furthermore, a 2019 Stanford study found that 94% of professionals who adopted a four-day work week reported increased productivity, though the original source of this figure is difficult to locate.
+
+According to the World Health Organization, over 3.4 million adults die each year as a result of being overweight or obese. The Mediterranean diet, first studied extensively by Ancel Keys in the 1950s, has been repeatedly linked to reduced cardiovascular risk in longitudinal cohort studies.
+
+As Einstein once said, "Everything should be made as simple as possible, but not simpler," a principle that modern minimalist design movements have embraced wholeheartedly.`;
+            updateCounts();
+            clearFile();
+            showToast('Sample text loaded', 'success');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                analyzeText();
+            }
+        });
+
+        function showToast(message, type = 'info') {
+            const colors = {
+                success: 'border-purple-500/40 text-purple-300',
+                error: 'border-rose-500/40 text-rose-400',
+                info: 'border-slate-600 text-slate-300'
+            };
+            const el = document.createElement('div');
+            el.className = `toast bg-ink-800 border ${colors[type] || colors.info} rounded-lg px-4 py-2.5 text-sm font-medium shadow-xl mb-2`;
+            el.innerText = message;
+            document.getElementById('toastContainer').appendChild(el);
+            setTimeout(() => el.remove(), 2000);
+        }
+
+        function toggleExportMenu() {
+            document.getElementById('exportMenu').classList.toggle('hidden');
+        }
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('exportMenu');
+            const btn = document.getElementById('exportMenuBtn');
+            if (!menu.contains(e.target) && !btn.contains(e.target)) {
+                menu.classList.add('hidden');
+            }
+        });
+
+        function cancelAnalysis() {
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
+        }
+
+        function smartFilterText(fullText) {
+            const words = fullText.split(/\s+/);
+            if (words.length <= 1000) {
+                return fullText;
+            }
+
+            const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+            const highValueSentences = sentences.filter(sentence => {
+                const s = sentence.toLowerCase();
+                const hasNumber = /\d+/.test(s);
+                const hasQuote = s.includes('"') || s.includes("'") || s.includes('“') || s.includes('”');
+                const hasCitationWord = s.includes('et al') || s.includes('study') || s.includes('research') || s.includes('according') || s.includes('citation') || s.includes('ref');
+                return hasNumber || hasQuote || hasCitationWord;
+            });
+
+            if (highValueSentences.length < 5) {
+                return words.slice(0, 1000).join(' ');
+            }
+
+            return highValueSentences.join(' ');
+        }
+
+        function chunkText(text, maxWordsPerChunk = 450) {
+            const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+            let chunks = [];
+            let currentChunk = '';
+            let currentWordCount = 0;
+
+            for (let sentence of sentences) {
+                const wordsInSentence = sentence.trim().split(/\s+/).length;
+                if (currentWordCount + wordsInSentence > maxWordsPerChunk && currentChunk.trim() !== '') {
+                    chunks.push(currentChunk.trim());
+                    currentChunk = sentence;
+                    currentWordCount = wordsInSentence;
+                } else {
+                    currentChunk += ' ' + sentence;
+                    currentWordCount += wordsInSentence;
+                }
+            }
+            if (currentChunk.trim() !== '') {
+                chunks.push(currentChunk.trim());
+            }
+            return chunks.length > 0 ? chunks : [text];
+        }
+
+        async function analyzeText() {
+            const rawText = textInput.value.trim();
+            const citationStyle = document.getElementById('citationStyle').value;
+            const errorContainer = document.getElementById('errorMsg');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const btnText = document.getElementById('btnText');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const exportPdfBtn = document.getElementById('exportPdfBtn');
+            const exportMenuBtn = document.getElementById('exportMenuBtn');
+            const filterBar = document.getElementById('filterBar');
+            const statusLabel = document.getElementById('statusLabel');
+
+            if (!rawText) {
+                showError("Please paste some text or upload a document to analyze.");
+                return;
+            }
+
+            errorContainer.classList.add('hidden');
+            exportPdfBtn.classList.add('hidden');
+            exportPdfBtn.classList.remove('flex');
+            exportMenuBtn.classList.add('hidden');
+            exportMenuBtn.classList.remove('flex');
+            document.getElementById('exportMenu').classList.add('hidden');
+            filterBar.classList.add('hidden');
+            analyzeBtn.disabled = true;
+            statusLabel.innerText = "Scanning";
+            currentResults = [];
+            currentFilter = 'all';
+            resultSearchTerm = '';
+
+            currentAbortController = new AbortController();
+
+            const text = smartFilterText(rawText);
+            const textChunks = chunkText(text, 200);
+            let aggregatedResults = [];
+
+            // Process a few chunks at once. Each chunk is an independent serverless
+            // invocation with its own 60s budget, so running several in parallel
+            // doesn't risk 504s on any single one — it just cuts total wait time.
+            async function processInBatches(chunks, maxConcurrent = 3) {
+                const results = [];
+                for (let i = 0; i < chunks.length; i += maxConcurrent) {
+                    if (currentAbortController.signal.aborted) throw new Error('AbortError');
+
+                    const batch = chunks.slice(i, i + maxConcurrent);
+                    btnText.innerText = `Analyzing sections ${i + 1}-${Math.min(i + maxConcurrent, chunks.length)} of ${chunks.length}...`;
+                    resultsContainer.innerHTML = buildSkeletonLoader(`Analyzing sections ${i + 1} to ${Math.min(i + maxConcurrent, chunks.length)}...`);
+
+                    const batchPromises = batch.map(chunkTextSegment =>
+                        fetch("/api/analyze", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            signal: currentAbortController.signal,
+                            body: JSON.stringify({ text: chunkTextSegment, citationStyle: citationStyle })
+                        }).then(async res => {
+                            const rawText = await res.text();
+                            let data;
+                            try {
+                                data = JSON.parse(rawText);
+                            } catch (e) {
+                                throw new Error(`Server Timeout/Crash: ${rawText.substring(0, 50)}...`);
+                            }
+                            if (!res.ok) throw new Error(data.error || "Failed to process section.");
+                            return data.results || [];
+                        })
+                    );
+
+                    const batchResults = await Promise.all(batchPromises);
+                    batchResults.forEach(resArray => results.push(...resArray));
+                }
+                return results;
+            }
+
+            try {
+                aggregatedResults = await processInBatches(textChunks, 3);
+
+                currentResults = aggregatedResults;
+                sessionScanCount++;
+                document.getElementById('sessionScans').innerText = `${sessionScanCount} scan${sessionScanCount === 1 ? '' : 's'} this session`;
+
+                renderFilterBar(currentResults);
+                renderResults(currentResults);
+
+                if (currentResults.length > 0) {
+                    exportPdfBtn.classList.remove('hidden');
+                    exportPdfBtn.classList.add('flex');
+                    exportMenuBtn.classList.remove('hidden');
+                    exportMenuBtn.classList.add('flex');
+                }
+
+            } catch (err) {
+                if (err.message === 'AbortError' || err.name === 'AbortError') {
+                    showError("Scan stopped by user.");
+                    resultsContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full text-slate-500 bg-ink-900/40 rounded-2xl border border-dashed border-purple-900/40 fade-in">
+                    <p class="font-medium text-slate-400">Analysis cancelled</p>
+                    <p class="text-sm mt-1 text-slate-600">The scan was stopped before it could finish.</p>
+                </div>`;
+                } else {
+                    showError(err.message);
+                    resultsContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full text-slate-500 bg-ink-900/40 rounded-2xl border border-dashed border-purple-900/40">
+                    <p class="font-medium text-slate-400">Analysis failed</p>
+                    <p class="text-sm mt-1 text-slate-600">${escapeHtml(err.message)}</p>
+                </div>`;
+                }
+            } finally {
+                analyzeBtn.disabled = false;
+                btnText.innerText = "Scan Document for Issues";
+                statusLabel.innerText = "Ready";
+                currentAbortController = null;
+            }
+        }
+
+        function buildSkeletonLoader(statusMessage = "Verifying claims & citations...") {
+            let cards = '';
+            for (let i = 0; i < 3; i++) {
+                cards += `
+                    <div class="p-6 rounded-2xl border border-purple-900/40 bg-ink-900/50 space-y-3">
+                        <div class="skeleton h-3 w-24 rounded"></div>
+                        <div class="skeleton h-4 w-3/4 rounded"></div>
+                        <div class="skeleton h-3 w-full rounded"></div>
+                        <div class="skeleton h-3 w-5/6 rounded"></div>
+                    </div>`;
+            }
+            return `
+                <div class="relative overflow-hidden rounded-2xl border border-purple-500/25 bg-ink-900/40 p-8 flex flex-col items-center justify-center mb-5">
+                    <div class="scanline"></div>
+                    <div class="relative w-14 h-14 mb-4">
+                        <div class="absolute inset-0 rounded-full border-t-2 border-purple-500 animate-spin"></div>
+                        <div class="absolute inset-2 rounded-full border-r-2 border-purple-300 animate-spin" style="animation-direction: reverse; animation-duration: 1.5s;"></div>
+                    </div>
+                    <p class="font-semibold tracking-wide text-purple-300 relative" id="chunkStatusText">${statusMessage}</p>
+                    <p class="text-sm text-slate-500 mt-1 mb-5 relative">Processing document efficiently</p>
+                    
+                    <button onclick="cancelAnalysis()" class="relative z-10 px-5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        Stop Analysis
+                    </button>
+                </div>
+                <div class="space-y-5 opacity-60">${cards}</div>
+            `;
+        }
+
+        function showError(msg) {
+            const errorContainer = document.getElementById('errorMsg');
+            const errorText = document.getElementById('errorText');
+            errorText.innerText = msg;
+            errorContainer.classList.remove('hidden');
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.innerText = str ?? '';
+            return div.innerHTML;
+        }
+
+        function renderFilterBar(results) {
+            const filterBar = document.getElementById('filterBar');
+            if (!results || results.length === 0) {
+                filterBar.classList.add('hidden');
+                return;
+            }
+
+            const counts = { all: results.length };
+            results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+
+            const labels = {
+                all: 'All',
+                verified: 'Verified',
+                hallucination: 'Hallucinations',
+                unverified: 'Unverified',
+                format_error: 'Format issues',
+                unverifiable: 'Unverifiable'
+            };
+
+            const order = ['all', 'hallucination', 'unverified', 'format_error', 'unverifiable', 'verified'];
+            filterBar.innerHTML = order
+                .filter(key => counts[key])
+                .map(key => `
+                    <button onclick="setFilter('${key}')" data-filter="${key}"
+                        class="filter-tab text-xs font-semibold px-3 py-1.5 rounded-full border transition-all ${key === currentFilter ? 'tab-active' : 'bg-ink-900/50 border-purple-900/40 text-slate-400 hover:text-slate-200 hover:border-purple-700/50'}">
+                        ${labels[key] || key} <span class="opacity-60">${counts[key]}</span>
+                    </button>
+                `).join('') + `
+                    <div class="w-full sm:w-auto sm:ml-auto relative mt-2 sm:mt-0">
+                        <input type="text" id="resultSearch" placeholder="Search claims..." oninput="setSearch(this.value)"
+                            class="bg-ink-900/50 border border-purple-900/40 text-slate-300 text-xs rounded-lg pl-3 pr-3 py-2 w-full sm:w-56 transition-all focus:outline-none focus:ring-1 focus:ring-purple-500/50 placeholder:text-slate-600">
+                    </div>
+                `;
+            filterBar.classList.remove('hidden');
+            filterBar.classList.add('flex');
+        }
+
+        function setFilter(key) {
+            currentFilter = key;
+            renderFilterBar(currentResults);
+            renderResults(currentResults);
+        }
+
+        function setSearch(val) {
+            resultSearchTerm = val.toLowerCase();
+            renderResults(currentResults, { preserveFocus: true });
+        }
+
+        function getFilteredResults(results) {
+            let filtered = currentFilter === 'all' ? results : results.filter(r => r.status === currentFilter);
+            if (resultSearchTerm) {
+                filtered = filtered.filter(r =>
+                    (r.textSegment || '').toLowerCase().includes(resultSearchTerm) ||
+                    (r.explanation || '').toLowerCase().includes(resultSearchTerm)
+                );
+            }
+            return filtered;
+        }
+
+        function renderResults(results, opts = {}) {
+            const container = document.getElementById('resultsContainer');
+            const searchHadFocus = opts.preserveFocus && document.activeElement && document.activeElement.id === 'resultSearch';
+            const cursorPos = searchHadFocus ? document.activeElement.selectionStart : null;
+
+            container.innerHTML = '';
+
+            if (!results || results.length === 0) {
+                container.innerHTML = `
+                    <div id="defaultState" class="flex flex-col items-center justify-center h-full text-slate-500 bg-ink-900/40 rounded-2xl border border-dashed border-purple-900/40">
+                        <div class="p-4 bg-ink-800/60 rounded-full mb-4">
+                            <svg class="w-8 h-8 opacity-60 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </div>
+                        <p class="font-medium text-slate-300">Ready to analyze</p>
+                        <p class="text-sm mt-1 text-slate-500">Paste text or upload a document to generate a report.</p>
+                    </div>`;
+                return;
+            }
+
+            const total = results.length;
+            const verified = results.filter(r => r.status === 'verified').length;
+            const score = Math.round((verified / total) * 100);
+
+            let scoreColor = "text-purple-300";
+            let scoreBg = "bg-purple-500/10 border-purple-500/25";
+            if (score < 80) { scoreColor = "text-amber-400"; scoreBg = "bg-amber-500/10 border-amber-500/20"; }
+            if (score < 50) { scoreColor = "text-rose-400"; scoreBg = "bg-rose-500/10 border-rose-500/20"; }
+
+            const summaryDashboard = document.createElement('div');
+            summaryDashboard.className = `p-5 rounded-2xl border ${scoreBg} flex items-center justify-between fade-in mb-6 shadow-sm`;
+            summaryDashboard.innerHTML = `
+                <div>
+                    <p class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-1">Overall Fact Integrity</p>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-4xl font-display font-extrabold ${scoreColor}">${score}%</span>
+                        <span class="text-slate-400 font-medium">Verified</span>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-slate-400"><span class="text-white font-bold">${total}</span> Total Claims</p>
+                    <p class="text-sm text-slate-400"><span class="text-white font-bold">${total - verified}</span> Issues Found</p>
+                </div>
+            `;
+            container.appendChild(summaryDashboard);
+
+            const filtered = getFilteredResults(results);
+
+            if (filtered.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'flex flex-col items-center justify-center py-16 text-slate-500 bg-ink-900/40 rounded-2xl border border-dashed border-purple-900/40 fade-in';
+                empty.innerHTML = `<p class="font-medium text-slate-400">No matching claims</p><p class="text-sm mt-1 text-slate-600">Try a different filter or search term.</p>`;
+                container.appendChild(empty);
+            }
+
+            filtered.forEach((result, index) => {
+                const config = getStatusConfig(result.status);
+                const delay = (index * 0.04) + 0.05;
+
+                const card = document.createElement('div');
+                card.className = `p-6 rounded-2xl border ${config.border} ${config.bg} shadow-sm hover:shadow-md transition-shadow fade-in relative overflow-hidden`;
+                card.style.animationDelay = `${delay}s`;
+
+                card.innerHTML += `<div class="absolute left-0 top-0 bottom-0 w-1 ${config.lineColor}"></div>`;
+
+                let riskColor = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+                if (result.riskLevel === 'medium') riskColor = "bg-amber-500/20 text-amber-400 border-amber-500/30";
+                if (result.riskLevel === 'high') riskColor = "bg-rose-500/20 text-rose-400 border-rose-500/30";
+
+                const improvementHtml = (result.status !== 'verified' && result.improvement && result.improvement.trim() !== '') ? `
+                    <div class="mt-5 p-4 bg-black/40 rounded-xl border border-purple-900/40 flex gap-3">
+                        <svg class="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <div class="w-full">
+                            <p class="text-xs font-bold uppercase tracking-wider text-purple-400 mb-1">Recommended Fix</p>
+                            <p class="text-sm text-slate-300 leading-relaxed">${escapeHtml(result.improvement)}</p>
+
+                            ${(result.suggestedSource && result.formattedCitation && result.suggestedSource.trim() !== '') ? `
+                            <div class="mt-4 pt-4 border-t border-purple-900/40">
+                                <p class="text-xs font-bold uppercase tracking-wider text-fuchsia-400 mb-1">Suggested Source</p>
+                                <p class="text-sm text-slate-300 mb-3 font-medium">${escapeHtml(result.suggestedSource)}</p>
+                                <div class="bg-ink-900/80 p-3 rounded-lg border border-purple-900/50 flex justify-between items-center gap-3 shadow-inner">
+                                    <code class="text-xs text-slate-400 flex-1 font-mono leading-relaxed">${escapeHtml(result.formattedCitation)}</code>
+                                    <button data-citation="${encodeURIComponent(result.formattedCitation)}" onclick="copyCitation(this)" class="text-xs bg-ink-800 hover:bg-purple-900/50 text-slate-300 px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 flex-shrink-0 border border-purple-900/50">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                        Copy
+                                    </button>
+                                </div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                ` : '';
+
+                const sourcesList = Array.isArray(result.sourcesChecked) ? result.sourcesChecked : [];
+                const sourcesHtml = sourcesList.length > 0 ? `
+                    <div class="mt-4 pt-4 border-t border-purple-900/40">
+                        <p class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                            Sources Checked (${sourcesList.length}) — Semantic Scholar &amp; CrossRef
+                        </p>
+                        <div class="max-h-32 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                            ${sourcesList.map(s => `
+                                <div class="text-xs bg-black/30 rounded-lg px-3 py-2 border border-purple-900/30">
+                                    <p class="text-slate-300 font-medium leading-snug">${escapeHtml(s.title || 'Untitled')}</p>
+                                    <p class="text-slate-500 mt-0.5">${escapeHtml(s.authors || 'Unknown Author')} · ${escapeHtml(String(s.year || 'N/A'))}${s.url && s.url !== 'N/A' ? ` · <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener" class="text-purple-400 hover:text-purple-300 underline">link</a>` : ''}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : '';
+
+                card.innerHTML += `
+                    <div class="flex items-start gap-4">
+                        <div class="mt-1 p-2 rounded-xl bg-black/40 shadow-inner border border-purple-900/40">${config.icon}</div>
+                        <div class="space-y-2 flex-1">
+                            <div class="flex items-center justify-between flex-wrap gap-2">
+                                <span class="stamp text-xs font-bold uppercase text-slate-400">
+                                    ${(result.type || '').replace('_', ' ')}
+                                </span>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs font-semibold px-2.5 py-1 rounded-md border ${riskColor}">
+                                        Risk: ${(result.riskLevel || 'low').toUpperCase()} (${result.evidenceType || 'General'})
+                                    </span>
+                                    <span class="text-xs font-mono bg-black/40 px-2.5 py-1 rounded-md text-slate-400 border border-purple-900/40 shadow-sm">
+                                        Conf: <span class="text-slate-200">${result.confidenceScore}%</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <p class="text-white font-medium text-[15px] leading-relaxed py-2">"${escapeHtml(result.textSegment)}"</p>
+                            <p class="text-sm text-slate-400 leading-relaxed"><strong class="text-slate-300 font-semibold">Analysis:</strong> ${escapeHtml(result.explanation)}</p>
+                            ${improvementHtml}
+                            ${sourcesHtml}
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
+            if (searchHadFocus) {
+                const input = document.getElementById('resultSearch');
+                if (input) {
+                    input.focus();
+                    input.setSelectionRange(cursorPos, cursorPos);
+                }
+            }
+        }
+
+        function copyCitation(btn) {
+            const citation = decodeURIComponent(btn.getAttribute('data-citation'));
+            navigator.clipboard.writeText(citation).then(() => showToast('Citation copied to clipboard', 'success'));
+        }
+
+        function copyFullReport() {
+            const text = buildTextReport();
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Report copied to clipboard', 'success');
+                document.getElementById('exportMenu').classList.add('hidden');
+            });
+        }
+
+        function buildTextReport() {
+            if (!currentResults || currentResults.length === 0) return '';
+            const total = currentResults.length;
+            const verified = currentResults.filter(r => r.status === 'verified').length;
+            const score = Math.round((verified / total) * 100);
+
+            let report = "=================================================\n";
+            report += "          PROOFPRINT INTEGRITY REPORT            \n";
+            report += "=================================================\n\n";
+            if (currentFileName) report += `Source: ${currentFileName}\n`;
+            report += `Generated: ${new Date().toLocaleString()}\n`;
+            report += `Overall Score: ${score}% Verified\n`;
+            report += `Total Claims Checked: ${total}\n`;
+            report += `Issues Found: ${total - verified}\n\n`;
+            report += "-------------------------------------------------\n\n";
+
+            currentResults.forEach((r, i) => {
+                report += `[${i + 1}] TYPE: ${(r.type || '').toUpperCase()} | STATUS: ${(r.status || '').toUpperCase()} | RISK: ${(r.riskLevel || 'low').toUpperCase()} (${r.evidenceType || 'General'})\n`;
+                report += `Claim: "${r.textSegment}"\n`;
+                report += `Analysis: ${r.explanation}\n`;
+
+                if (r.status !== 'verified' && r.improvement) {
+                    report += `\n>> FIX: ${r.improvement}\n`;
+                    if (r.suggestedSource) {
+                        report += `>> SUGGESTED SOURCE: ${r.suggestedSource}\n`;
+                        report += `>> CITATION: ${r.formattedCitation}\n`;
+                    }
+                }
+                report += "\n-------------------------------------------------\n\n";
+            });
+            return report;
+        }
+
+        function exportReport(format) {
+            if (!currentResults || currentResults.length === 0) return;
+            document.getElementById('exportMenu').classList.add('hidden');
+
+            let blob, filename;
+            if (format === 'json') {
+                blob = new Blob([JSON.stringify(currentResults, null, 2)], { type: 'application/json' });
+                filename = `ProofPrint_Report_${Date.now()}.json`;
+            } else {
+                blob = new Blob([buildTextReport()], { type: 'text/plain' });
+                filename = `ProofPrint_Report_${Date.now()}.txt`;
+            }
+
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showToast(`Downloaded ${filename}`, 'success');
+        }
+
+        function exportPdf() {
+            if (!currentResults || currentResults.length === 0) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 48;
+            const contentWidth = pageWidth - margin * 2;
+            let y = margin;
+
+            const purple = [147, 51, 234];
+            const black = [10, 6, 15];
+            const white = [255, 255, 255];
+
+            const statusColors = {
+                verified: [16, 185, 129],
+                hallucination: [225, 29, 72],
+                unverified: [217, 119, 6],
+                format_error: [37, 99, 235],
+                unverifiable: [147, 51, 234]
+            };
+
+            function ensureSpace(neededHeight) {
+                if (y + neededHeight > pageHeight - margin) {
+                    doc.addPage();
+                    y = margin;
+                }
+            }
+
+            function drawHeaderBand() {
+                doc.setFillColor(...black);
+                doc.rect(0, 0, pageWidth, 86, 'F');
+                doc.setFillColor(...purple);
+                doc.rect(0, 84, pageWidth, 2, 'F');
+                doc.setTextColor(...white);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(20);
+                doc.text('ProofPrint', margin, 40);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+                doc.setTextColor(200, 180, 230);
+                doc.text('AI Fact & Citation Integrity Report', margin, 58);
+            }
+
+            drawHeaderBand();
+            y = 110;
+
+            doc.setTextColor(60, 60, 70);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            const metaLine = `${currentFileName ? 'Source: ' + currentFileName + '   |   ' : ''}Generated ${new Date().toLocaleString()}`;
+            doc.text(metaLine, margin, y);
+            y += 24;
+
+            const total = currentResults.length;
+            const verifiedCount = currentResults.filter(r => r.status === 'verified').length;
+            const score = Math.round((verifiedCount / total) * 100);
+
+            doc.setDrawColor(230, 230, 235);
+            doc.setFillColor(248, 245, 252);
+            doc.roundedRect(margin, y, contentWidth, 64, 6, 6, 'FD');
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(26);
+            doc.setTextColor(...purple);
+            doc.text(`${score}%`, margin + 20, y + 42);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(10);
+            doc.setTextColor(90, 90, 100);
+            doc.text('Overall Fact Integrity', margin + 100, y + 26);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(30, 30, 35);
+            doc.text(`${total}`, margin + 100, y + 46);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(90, 90, 100);
+            doc.text('Total claims checked', margin + 118, y + 46);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(30, 30, 35);
+            doc.text(`${total - verifiedCount}`, margin + 260, y + 46);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(90, 90, 100);
+            doc.text('Issues found', margin + 280, y + 46);
+
+            y += 90;
+
+            currentResults.forEach((r, i) => {
+                const color = statusColors[r.status] || [120, 120, 130];
+
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(10.5);
+                const segmentLines = doc.splitTextToSize(`"${r.textSegment}"`, contentWidth - 24);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                const explanationLines = doc.splitTextToSize(r.explanation || '', contentWidth - 24);
+
+                let improvementLines = [];
+                let citationLines = [];
+                const hasImprovement = r.status !== 'verified' && r.improvement && r.improvement.trim() !== '';
+                if (hasImprovement) {
+                    improvementLines = doc.splitTextToSize(r.improvement, contentWidth - 24);
+                    if (r.suggestedSource) {
+                        citationLines = doc.splitTextToSize(`${r.suggestedSource} — ${r.formattedCitation}`, contentWidth - 24);
+                    }
+                }
+
+                const headerHeight = 26;
+                const segmentHeight = segmentLines.length * 13 + 6;
+                const explanationHeight = explanationLines.length * 12 + 4;
+                const improvementHeight = hasImprovement ? (improvementLines.length * 12 + citationLines.length * 11 + 24) : 0;
+                const cardHeight = headerHeight + segmentHeight + explanationHeight + improvementHeight + 20;
+
+                ensureSpace(cardHeight + 12);
+
+                doc.setFillColor(250, 250, 252);
+                doc.setDrawColor(225, 225, 232);
+                doc.roundedRect(margin, y, contentWidth, cardHeight, 5, 5, 'FD');
+
+                doc.setFillColor(...color);
+                doc.rect(margin, y, 3, cardHeight, 'F');
+
+                let cy = y + 18;
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(8.5);
+                doc.setTextColor(90, 90, 100);
+                const typeText = `${(r.type || '').replace('_', ' ').toUpperCase()}`;
+                doc.text(typeText, margin + 16, cy);
+
+                const statusText = `${(r.status || '').replace('_', ' ').toUpperCase()}`;
+                doc.setTextColor(...color);
+                doc.text(statusText, margin + 16 + doc.getTextWidth(typeText) + 12, cy);
+
+                const riskString = `RISK: ${(r.riskLevel || 'low').toUpperCase()} (${r.evidenceType || 'General'})`;
+                doc.setTextColor(150, 100, 150);
+                doc.text(riskString, margin + 16 + doc.getTextWidth(typeText) + 12 + doc.getTextWidth(statusText) + 12, cy);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(120, 120, 130);
+                doc.text(`Confidence: ${r.confidenceScore}%`, pageWidth - margin - 16, cy, { align: 'right' });
+
+                cy += 16;
+
+                doc.setFont('helvetica', 'italic');
+                doc.setFontSize(10.5);
+                doc.setTextColor(20, 20, 25);
+                segmentLines.forEach(line => {
+                    doc.text(line, margin + 16, cy);
+                    cy += 13;
+                });
+
+                cy += 4;
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(9.5);
+                doc.setTextColor(70, 70, 80);
+                explanationLines.forEach(line => {
+                    doc.text(line, margin + 16, cy);
+                    cy += 12;
+                });
+
+                if (hasImprovement) {
+                    cy += 10;
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(...purple);
+                    doc.text('RECOMMENDED FIX', margin + 16, cy);
+                    cy += 12;
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(9.5);
+                    doc.setTextColor(60, 60, 70);
+                    improvementLines.forEach(line => {
+                        doc.text(line, margin + 16, cy);
+                        cy += 12;
+                    });
+                    if (citationLines.length > 0) {
+                        cy += 4;
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(8);
+                        doc.setTextColor(150, 60, 200);
+                        doc.text('SUGGESTED SOURCE', margin + 16, cy);
+                        cy += 11;
+                        doc.setFont('courier', 'normal');
+                        doc.setFontSize(8.5);
+                        doc.setTextColor(80, 80, 90);
+                        citationLines.forEach(line => {
+                            doc.text(line, margin + 16, cy);
+                            cy += 11;
+                        });
+                    }
+                }
+
+                y += cardHeight + 14;
+            });
+
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let p = 1; p <= pageCount; p++) {
+                doc.setPage(p);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(150, 150, 160);
+                doc.text('Generated by ProofPrint — verify critical citations manually.', margin, pageHeight - 20);
+                doc.text(`Page ${p} of ${pageCount}`, pageWidth - margin, pageHeight - 20, { align: 'right' });
+            }
+
+            const filename = `ProofPrint_Report_${Date.now()}.pdf`;
+            doc.save(filename);
+            showToast(`Downloaded ${filename}`, 'success');
+        }
+
+        function getStatusConfig(status) {
+            const icons = {
+                check: `<svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
+                alert: `<svg class="w-6 h-6 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`,
+                error: `<svg class="w-6 h-6 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`,
+                format: `<svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`,
+                unknown: `<svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+            };
+
+            switch (status) {
+                case "verified": return { icon: icons.check, border: "border-emerald-500/25", bg: "bg-emerald-500/5", lineColor: "bg-emerald-500" };
+                case "hallucination": return { icon: icons.error, border: "border-rose-500/30", bg: "bg-rose-500/10", lineColor: "bg-rose-500" };
+                case "unverified": return { icon: icons.alert, border: "border-amber-500/30", bg: "bg-amber-500/10", lineColor: "bg-amber-500" };
+                case "format_error": return { icon: icons.format, border: "border-blue-500/30", bg: "bg-blue-500/10", lineColor: "bg-blue-500" };
+                case "unverifiable": return { icon: icons.unknown, border: "border-purple-500/30", bg: "bg-purple-500/10", lineColor: "bg-purple-500" };
+                default: return { icon: icons.unknown, border: "border-slate-700", bg: "bg-slate-800", lineColor: "bg-slate-500" };
+            }
+        }
+    </script>
+</body>
+
+</html>
